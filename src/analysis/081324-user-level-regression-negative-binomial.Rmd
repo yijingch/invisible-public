@@ -1,0 +1,297 @@
+---
+title: "Zero-inflated regression (user-level)"
+author: "yijing"
+date: "2024-07-09"
+output: html_document
+---
+
+OLS Regression: fits line to minimize the squared residuals in the y direction (residuals should be normally distributed around fitted line  with consistant variance)
+
+Generalized linear model (for counts): allow the DV to distribute differently
+- Poisson
+- Negative Binomial
+
+Resources:
+
+1. https://cran.r-project.org/web/packages/svyVGAM/vignettes/zeroinfl.html
+
+"if you didn’t see any salmon it could be because the area is salmon-free or because you just randomly didn’t see any. To turn this into a regression model we typically put a logistic regression structure on Z and a Poisson regression structure on P"
+
+2. https://strengejacke.github.io/sjstats/reference/svyglm.zip.html
+
+3. https://notstatschat.rbind.io/2015/05/26/zero-inflated-poisson-from-complex-samples/
+- dataset used in this example: https://wwwn.cdc.gov/Nchs/Nhanes/2003-2004/DEMO_C.htm 
+- packages used in this example: https://www.rdocumentation.org/packages/survey/versions/4.4-2/topics/svydesign
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(svyVGAM)
+library(survey)
+library(pscl)
+library(ggplot2)
+library(MASS)
+library(performance)
+library(tidyverse)
+library(AER)
+```
+
+```{r}
+ROOTPATH <- substr(getwd(), 1, nchar(getwd())-12)
+ROOTPATH
+```
+
+# Load data
+
+```{r}
+reg_table <- read.csv(paste(ROOTPATH, "output/reg_table_nofilter.csv", sep=""))
+reg_table$age = reg_table$age / 10
+reg_table$extreme_lftRght = abs(reg_table$lftRght - 5)
+reg_table$extreme_antiPro = abs(reg_table$feel_thm_fdsz - 5)
+reg_table$extreme_lftRght[is.na(reg_table$extreme_lftRght)] <- 0
+reg_table$extreme_antiPro[is.na(reg_table$extreme_antiPro)] <- 0
+reg_table
+```
+
+
+# Negative Bionomial regression (NBR)
+
+## glmmTMB
+
+```{r}
+library(glmmTMB)
+
+nbr.view <- glmmTMB(
+  #view_counts ~ gender + age + education + if_progov + if_antigov, 
+  view_counts ~ gender + age + education + interest_politics + if_progov + if_antigov,
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+
+nbr.subscribe <- glmmTMB(
+  #subscribe_counts ~ gender + age + education + if_progov + if_antigov, 
+  subscribe_counts ~ gender + age + education + interest_politics + if_progov + if_antigov,
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+
+nbr.comment <- glmmTMB(
+  #comment_counts ~ gender + age + education + if_progov + if_antigov, 
+  comment_counts ~ gender + age + education + interest_politics + if_progov + if_antigov,
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+
+```
+
+```{r}
+#summary(nbr.view)
+#summary(nbr.subscribe)
+summary(nbr.comment)
+```
+
+### (Appendix Figures) Additional Variables with left/right
+
+```{r}
+library(glmmTMB)
+
+nbr.view <- glmmTMB(
+  #view_counts ~ gender + age + education + if_progov + if_antigov + if_left + if_right, 
+  view_counts ~ gender + age + education + interest_politics + if_progov + if_antigov + if_left + if_right, 
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+
+nbr.subscribe <- glmmTMB(
+  #subscribe_counts ~ gender + age + education + if_progov + if_antigov + if_left + if_right, 
+  subscribe_counts ~ gender + age + education + interest_politics + if_progov + if_antigov + if_left + if_right, 
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+
+nbr.comment <- glmmTMB(
+  #comment_counts ~ gender + age + education + if_progov + if_antigov + if_left + if_right, 
+  comment_counts ~ gender + age + education + interest_politics + if_progov + if_antigov + if_left + if_right, 
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+```
+
+### (Appendix Figures) Using Extremity as Variable
+
+
+```{r}
+library(glmmTMB)
+
+nbr.view <- glmmTMB(
+  view_counts ~ gender + age + education + extreme_antiPro,
+  #view_counts ~ gender + age + education + interest_politics + extreme_antiPro,
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+
+nbr.subscribe <- glmmTMB(
+  subscribe_counts ~ gender + age + education + extreme_antiPro,
+  #subscribe_counts ~ gender + age + education + interest_politics + extreme_antiPro,
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+
+nbr.comment <- glmmTMB(
+  comment_counts ~ gender + age + education + extreme_antiPro,
+  #comment_counts ~ gender + age + education + interest_politics + extreme_antiPro,
+  weights = weight,
+  data = reg_table, 
+  family = nbinom2)
+```
+
+```{r}
+summary(nbr.view)
+```
+
+## glm.nb
+
+(has convergence issue for comment data)
+
+```{r}
+#reg_table_filter <- na.omit(reg_table)
+
+# nbr.view <- glm.nb(
+  #view_counts ~ gender + age.new + education + interest_politics + if_progov + if_antigov, 
+  #view_counts ~ gender + age + education + if_progov + if_antigov, 
+  #view_counts ~ gender + age + education + interest_politics,
+  #weights = weight,
+  #control = glm.control(maxit = 5000),
+  #data = reg_table)
+
+# nbr.subscribe <- glm.nb(
+  #subscribe_counts ~ gender + age.new + education + interest_politics + if_progov + if_antigov, 
+  #subscribe_counts ~ gender + age + education + if_progov + if_antigov, 
+  #subscribe_counts ~ gender + age + education + interest_politics,
+  #weights = weight,
+  #control = glm.control(maxit = 5000),
+  #data = reg_table)
+
+# nbr.comment <- glm.nb(
+  #comment_counts ~ gender + age.new + education + interest_politics + if_progov + if_antigov, 
+  #comment_counts ~ gender + age + education + if_progov + if_antigov, 
+  #comment_counts ~ gender + age + education + interest_politics,
+  #weights = weight,
+  #control = glm.control(maxit = 5000),
+  #data = reg_table)
+
+#summary(nbr.comment)
+```
+
+# Evaluation
+```{r}
+#library("performance")
+#summary(nbr.view)
+```
+
+# Visualizations 
+
+## dotwhisker
+```{r}
+library(dotwhisker)
+models <- list(comment=nbr.comment, subscribe=nbr.subscribe, view=nbr.view)
+reg_plot = dwplot(models, 
+                  dot_args=list(size=5), 
+                  whisker_args=list(size=1.5)) +
+    facet_grid(~model, scales="free_x") +
+    theme_bw(base_size = 10) +
+    geom_vline(xintercept = 0, colour = "black", linetype = 2, size=1) + 
+    scale_color_manual(values=c("#4582b4", "#ff4500","#2d8b57")) + 
+    theme(legend.position="none") + 
+    ggtitle("Negative Binomial Regression Coefficients") +
+    theme(
+      plot.title = element_text(face = "bold", size=24),
+      text = element_text(size = 22),
+      axis.text.x = element_text(size=15))
+ggsave(
+  paste(ROOTPATH, "output/results-summary-080524/nbr_coeff_nbinom2_extreme_antipro_full.pdf", sep=""), 
+  device="pdf",
+  width=10,
+  plot=reg_plot)
+reg_plot
+```
+
+
+## GGally
+ 
+```{r}
+library(GGally)
+ggcoef_model(nbr.view) + 
+  labs(x = "coefficients")
+
+ggcoef_model(nbr.subscribe) + 
+  labs(x = "coefficients")
+
+ggcoef_model(nbr.comment) + 
+  labs(x = "coefficients")
+```
+
+```{r}
+check_zeroinflation(nbr.view)
+check_zeroinflation(nbr.subscribe)
+check_zeroinflation(nbr.comment)
+```
+# Now, apply zero-inflated models
+
+```{r}
+des = svydesign(
+  id = ~0, # specifying cluster ids from largest level to smallest level (0 or 1 is for no clusters)
+  weights = ~weight,
+  data = reg_table)
+```
+
+
+```{r}
+#reg_table_filter <- na.omit(reg_table)
+reg_table_filter <- reg_table
+
+zinb.view <- zeroinfl(
+  view_counts ~ gender + age + education + interest_politics + if_progov + if_antigov, 
+  data = reg_table_filter, 
+  weights = weight,
+  link = "logit", 
+  dist = "negbin")
+
+zinb.subscribe <- zeroinfl(
+  subscribe_counts ~ gender + age + education + interest_politics + if_progov + if_antigov, 
+  data = reg_table_filter, 
+  weights = weight,
+  link = "logit", 
+  dist = "negbin")
+
+zinb.comment <- zeroinfl(
+  comment_counts ~ gender + age + education + interest_politics + if_progov + if_antigov, 
+  data = reg_table_filter, 
+  weights = weight,
+  link = "logit", 
+  dist = "negbin")
+
+# summary(zinb)
+```
+
+```{r}
+BIC(zinb.view)
+BIC(zinb.subscribe)
+BIC(zinb.comment)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
