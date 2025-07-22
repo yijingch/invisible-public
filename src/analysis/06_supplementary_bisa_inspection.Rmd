@@ -1,0 +1,368 @@
+---
+title: "Supplementary analysis for bias inspection in the data donation studies"
+author: "yijing"
+date: "2024-07-09"
+output: html_document
+---
+
+# Supplementary analysis of data donation biases
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(sjmisc)
+library(sjPlot)
+library(sjstats)
+library(sjlabelled)
+library(lme4)
+library(lmerTest)
+library(ggplot2)
+library(lavaan)
+library(psych)
+library(mice)
+library(miceadds)
+library(jtools)
+library(broom.mixed)
+library(margins)
+
+ROOTPATH <- substr(getwd(), 1, nchar(getwd())-12)
+ROOTPATH
+```
+
+
+# Load data
+```{r}
+# Data file available here: https://osf.io/kyhp5/files/osfstorage
+load(paste(ROOTPATH, "data/DD_WillignessActual.Rdata", sep=""))
+rm(hun.vignette)
+```
+
+# EDA 
+```{r}
+#Gender
+frq(hun.data$D1)
+
+#Age
+descr(hun.data$age)
+
+#Divide age with 10 for easier interpretation in the models
+#hun.data$age <- hun.data$age/10
+
+#Educaation
+frq(hun.data$D3)
+hun.data$D3 <- as_numeric(hun.data$D3)
+
+#Subjective wealth
+#frq(hun.data$D11)
+hun.data$D11 <- set_na(hun.data$D11, na=c(9))
+hun.data$D11_reversed <- rec(hun.data$D11, rec="rev") # reverse order of subjective wealth status codes, so highest is most well off
+
+##Number of used platform (FB, Twitter, Youtube, Insta, TikTok)
+
+hun.data$SM1_1_d <- 
+  rec(hun.data$SM1_1, rec="1:4=1; 5=0", append=F)
+
+hun.data$SM1_2_d <- 
+  rec(hun.data$SM1_2, rec="1:4=1; 5=0", append=F)
+
+hun.data$SM1_3_d <- 
+  rec(hun.data$SM1_3, rec="1:4=1; 5=0", append=F)
+
+hun.data$SM1_4_d <- 
+  rec(hun.data$SM1_4, rec="1:4=1; 5=0", append=F)
+
+hun.data$SM1_6_d <- 
+  rec(hun.data$SM1_6, rec="1:4=1; 5=0", append=F)
+
+
+hun.data$no_of_platforms <- hun.data$SM1_1_d + hun.data$SM1_2_d  + hun.data$SM1_3_d  + hun.data$SM1_4_d  +
+  hun.data$SM1_6_d 
+
+#Frequency of usage of the most used platform (reversed)
+
+hun.data$SM_usage <-  hun.data  %>% 
+  select(., SM1_1, SM1_2, SM1_3, SM1_4, SM1_6) %>% 
+  apply(., 1, min) %>% 
+  as_numeric(.) %>% 
+  set_na(., na=c(9))
+
+hun.data$SM_usage <- rec(hun.data$SM_usage, rec="rev")
+
+## IUIPC (privacy attitude scale) / (AT1_x) - CFA
+
+hun.data$AT1_1 <- hun.data$AT1_1 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT1_2 <- hun.data$AT1_2 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT1_3 <- hun.data$AT1_3 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT1_4 <- hun.data$AT1_4 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT1_5 <- hun.data$AT1_5 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT1_6 <- hun.data$AT1_6 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT1_7 <- hun.data$AT1_7 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT1_8 <- hun.data$AT1_8 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+#CFA model
+
+AT1_cfa.model <- 'IUIPC_control =~ AT1_1 + AT1_2 + AT1_3 # IUIPC_aware =~ AT1_4 + AT1_5 + AT1_6 taken out bc high corr btw latent vars
+ IUIPC_collect =~ AT1_7 + AT1_8
+#AT1_1 ~~ AT1_5
+AT1_3 ~~ AT1_7
+#AT1_6 ~~ AT1_8
+'
+fit.AT1_cfa <- cfa(AT1_cfa.model, data = hun.data, estimator="DWLS", sampling.weights="weight")
+
+hun.data <- hun.data %>% 
+  select(.,sorsz,  AT1_1, AT1_2, AT1_3, AT1_7, AT1_8) %>% 
+  na.omit(.) %>%
+  mutate(., IUIPC_cn=lavPredict(fit.AT1_cfa)[,1], IUIPC_cl=lavPredict(fit.AT1_cfa)[,2]) %>%
+  select(., sorsz, IUIPC_cn, IUIPC_cl) %>%
+  left_join(hun.data, .)
+
+## Trust in data protection (AT2_x) - PCA
+
+
+hun.data$AT2_2 <- hun.data$AT2_2 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT2_3 <- hun.data$AT2_3 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+
+hun.data$priv_bel <-  hun.data %>%
+  select(., c("AT2_2","AT2_3")) %>%
+  principal(., weight=hun.data$weight) %>%
+  .$scores %>%
+  as.numeric(.)
+
+
+## Tech scale (AT3_x) - analysis of answers based on: https://ati-scale.org/wp-content/uploads/2022/02/ati-scale_english_2022-02-25.pdf
+
+hun.data$AT3_1 <- hun.data$AT3_1 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT3_2 <- hun.data$AT3_2 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT3_3 <- hun.data$AT3_3 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT3_4 <- hun.data$AT3_4 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT3_5 <- hun.data$AT3_5 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT3_6 <- hun.data$AT3_6 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT3_7 <- hun.data$AT3_7 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT3_8 <- hun.data$AT3_8 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$AT3_9 <- hun.data$AT3_9 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+
+hun.data$AT3_3 <- rec(hun.data$AT3_3, rec = "rev") # reverse the three variables that are asked in the reverse way
+hun.data$AT3_6 <- rec(hun.data$AT3_6, rec = "rev")
+hun.data$AT3_8 <- rec(hun.data$AT3_8, rec = "rev")
+
+hun.data$tech <-  hun.data %>% 
+  select(., AT3_1, AT3_2, AT3_3, AT3_4, AT3_5, AT3_6, AT3_7, AT3_8, AT3_9) %>% 
+  rowMeans(., na.rm = T, dims = 1)
+
+
+## Big Five personality traits - CFA
+
+hun.data$BF_1 <- hun.data$BF_1 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_2 <- hun.data$BF_2 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_3 <- hun.data$BF_3 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_4 <- hun.data$BF_4 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_5 <- hun.data$BF_5 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_6 <- hun.data$BF_6 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_7 <- hun.data$BF_7 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_8 <- hun.data$BF_8 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_9 <- hun.data$BF_9 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_10 <- hun.data$BF_10 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_11 <- hun.data$BF_11 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_12 <- hun.data$BF_12 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_13 <- hun.data$BF_13 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_14 <- hun.data$BF_14 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$BF_15 <- hun.data$BF_15 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+
+BF_cfa.model <- '  
+ BF_neuro =~ BF_1 + BF_2 
+ BF_extrovert =~ BF_4 + BF_5
+ BF_open =~ BF_7 + BF_8 + BF_9
+ BF_agree =~ BF_11 + BF_12
+ BF_con =~ BF_13 + BF_15
+
+BF_2 ~~ 1*BF_2
+'
+fit.BF_cfa <- cfa(BF_cfa.model, data = hun.data, estimator="DWLS", sampling.weights="weight")
+#summary(fit.BF_cfa, fit.measures=T)
+
+hun.data <- hun.data %>% 
+  select(.,sorsz,  BF_1, BF_2, BF_4, BF_5, BF_7, BF_8, BF_9,
+         BF_11, BF_12, BF_13, BF_15) %>% 
+  na.omit(.) %>%
+  mutate(., BF_ner=lavPredict(fit.BF_cfa)[,1], BF_xtr=lavPredict(fit.BF_cfa)[,2],
+         BF_opn=lavPredict(fit.BF_cfa)[,3],BF_agr=lavPredict(fit.BF_cfa)[,4],
+         BF_con=lavPredict(fit.BF_cfa)[,5],) %>%
+  select(., sorsz, BF_ner, BF_xtr, BF_opn, BF_agr,BF_con ) %>%
+  left_join(hun.data, .)
+
+
+# political interest
+
+hun.data$POL1 <- hun.data$POL1 %>% 
+  set_na(., na=c(9)) %>% 
+  as_numeric(.)
+
+hun.data$pro_gov_symp <- as_factor(rec(hun.data$POL4_1, rec="1:2=1 [disklike]; 3:5, 9=2 [neutral, NA]; 6:7=3 [like]",
+                                     var.label = "Pro-gov party Sympathy"))
+
+hun.data <- hun.data %>% 
+  select(., c("sorsz", "SM10","SM1_1" ,"D1","age","D3","D11_reversed",
+              "IUIPC_cn","IUIPC_cl","priv_bel","tech",
+              "BF_opn", "BF_con","BF_xtr", "BF_agr", "BF_ner",
+              "SM_usage", "no_of_platforms", "POL1", "pro_gov_symp","weight", 
+              , "status"))
+
+hun.data$sv_uploaded <-  rec(hun.data$status, rec=c("7=1 [Yes]; else=0 [No]"), var.label="Actual participation")
+
+rm(fit.AT1_cfa, fit.BF_cfa, AT1_cfa.model, BF_cfa.model)
+
+# filter out those, who did not have FB and Google account
+hun.data <- hun.data %>% 
+  filter(., status!=4) %>%
+  filter(., status!=0) %>%
+  filter(., SM10==1) %>% 
+  filter(., as.numeric(SM1_1)<5) %>%
+  select(., -c(SM10, SM1_1))
+
+hun.data$weight <-  nrow(hun.data)/sum(hun.data$weight)
+
+
+hun.data$pro_gov_symp <- relevel(hun.data$pro_gov_symp, ref="2")
+
+```
+
+# plot figures
+Figure 16: Predictors of actual data donation - logistic regression model - Average Marginal Effects
+```{r}
+reg_model  <- glm(formula = sv_uploaded ~ D1 + age + D3 + D11_reversed +
+                      IUIPC_cn + IUIPC_cl + priv_bel + tech + 
+                      BF_opn + BF_con + BF_xtr + BF_agr + BF_ner 
+                    + SM_usage + no_of_platforms + POL1 + pro_gov_symp, weights = weight, family = "binomial", data=hun.data)
+
+tab_model(reg_model)
+
+res_reg_model <- summary(margins(reg_model))
+
+
+labels <- rev(c("Gender", "Age/10", "Education", "Subjective wealth", 
+                "IUIPC_control", "IUIPC_collect", "Privacy beliefs", 
+                "Tech attitudes", "BF: openness", "BF: conscientiousness", 
+                "BF: extroversion", "BF: agreeability", "BF: neuroticism", 
+                "Social Media usage frequency", "No. of platforms", "Political interest","Anti-gov","Pro-gov"))
+
+# plot Figure 16
+res_reg_model %>%
+  mutate(varnames = factor(factor, levels = rev(c("willingness1","D12","age","D3","D11_reversed",
+                                                  "IUIPC_cn","IUIPC_cl","priv_bel","tech",
+                                                  "BF_opn","BF_con","BF_xtr","BF_agr","BF_ner",
+                                                  "SM_usage","no_of_platforms","POL1","pro_gov_symp1","pro_gov_symp3")))) %>% 
+  ggplot(aes(varnames,AME)) +
+  geom_pointrange(aes(ymin=AME-2*SE, ymax=AME+2*SE), color="darkgrey") + 
+  geom_point(shape=21,size=3, color="navyblue", shape = 1) +
+  geom_hline(yintercept = 0,color="grey25",linetype="dashed") +
+  theme_minimal() + 
+  coord_flip()+
+  scale_y_continuous(name="AME")+
+  scale_x_discrete(name="",labels=labels)+
+  theme(legend.position = "none") +
+  theme(axis.text=element_text(size=16))
+
+# uncomment this to save figure
+#ggsave("sample_bias.png")
+```

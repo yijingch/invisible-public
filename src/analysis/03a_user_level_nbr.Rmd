@@ -1,0 +1,191 @@
+---
+title: "Negative Binomial Regression (user-level)"
+author: "yijing"
+date: "2024-07-09"
+output: html_document
+---
+
+# Generating Negative Binomial regression output for user-level analysis
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(svyVGAM)
+library(survey)
+library(pscl)
+library(ggplot2)
+library(MASS)
+library(performance)
+library(tidyverse)
+library(AER)
+library(dotwhisker)
+library(glmmTMB)
+
+ROOTPATH <- substr(getwd(), 1, nchar(getwd())-12)
+ROOTPATH
+```
+
+## Load data
+
+```{r}
+reg_table <- read.csv(paste(ROOTPATH, "output/reg_table_filter_ytb_activities_122324.csv", sep=""))
+reg_table$age = reg_table$age / 10
+reg_table$timespan_imputed = reg_table$timespan_imputed / 60
+reg_table
+```
+
+## Negative Bionomial regression (NBR) - using glmmTMB
+
+### NBR with Anti-/Pro-gov 
+
+Here we use the same code template and tweak a few parameters to produce 4 figures 
+
+- Figure 3 (main text): include `if_progov`, `if_antigov` in the IVs; keeping respondents who have engaged with any youtube content in a certain form (Table 3)
+- Figure 10-A (appendix): include `extreme_antiPro` in the IVs; keeping respondents who have engaged with any youtube content in a certain form (Table 3)
+- Figure 14-A1 (appendix): include `if_progov`, `if_antigov` in the IVs; keeping all respondents who have and have not engaged with youtube content (N = 735)
+- Figure 14-B1 (appendix): include `extreme_antiPro` in the IVs; keeping all respondents who have and have not engaged with youtube content (N = 735)
+  
+- produce Figure 
+```{r}
+# 1: build models
+nbr.view <- glmmTMB(
+  view_counts ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 3, Figure 14-A1
+  #view_counts ~ gender + age + education + timespan_imputed + interest_politics + extreme_antiPro,  # Figure 10-A, Figure 14-B1
+  weights = weight,
+  data = reg_table,  # Figure 14-A1, Figure 14-B1
+  #data = subset(reg_table, if_view==1),  # Figure 3, Figure 10-A
+  family = nbinom2)
+
+nbr.subscribe <- glmmTMB(
+  subscribe_counts ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 3, Figure 14-A1
+  #subscribe_counts ~ gender + age + education + timespan_imputed + interest_politics + extreme_antiPro,  # Figure 10-A, Figure 14-B1
+  weights = weight,
+  data = reg_table,  # Figure 14-A1, Figure 14-B1
+  #data = subset(reg_table, if_subscribe==1),  # Figure 3, Figure 10-A
+  family = nbinom2)
+
+nbr.comment <- glmmTMB(
+  comment_counts ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 3, Figure 14-A1
+  #comment_counts ~ gender + age + education + timespan_imputed + interest_politics + extreme_antiPro,  # Figure 10-A, Figure 14-B1
+  weights = weight,
+  data = reg_table,  # Figure 14-A1, Figure 14-B1
+  #data = subset(reg_table, if_comment==1),   # Figure 3, Figure 10-A
+  family = nbinom2)
+
+# 2. show model summary: uncomment this block for more details on the NBR results
+#summary(nbr.view)
+#summary(nbr.subscribe)
+#summary(nbr.comment)
+
+# 3: visualize results
+models <- list(comment=nbr.comment, subscribe=nbr.subscribe, view=nbr.view)
+reg_plot = dwplot(models, 
+                  dot_args=list(size=5), 
+                  whisker_args=list(size=1.5)) +
+    #facet_grid(~model, scales="free_x") + # if allowing for flexible scaling
+    facet_grid(~model) +
+    theme_bw(base_size = 10) +
+    geom_vline(xintercept = 0, colour = "black", linetype = 2, size=1) + 
+    scale_color_manual(values=c("#4582b4", "#ff4500","#2d8b57")) + 
+    theme(legend.position="none") + 
+    #ggtitle("(B)") + 
+    theme(
+      plot.title = element_text(face = "bold", size=24),
+      text = element_text(size = 22),
+      axis.text.x = element_text(size=15)) + 
+    scale_y_discrete(labels = c("anti-gov", "pro-gov", "interest in politics", "timespan", "education", "age","gender"))  # Figure 3, Figure 14-A1
+    #scale_y_discrete(labels = c("anti-/pro-gov\nextremity", "interest in politics", "timespan", "education", "age","gender"))  # Figure 10-A, Figure 14-B1
+
+# 4: save figures: uncomment this block to save the output figures
+#ggsave(
+  #paste(ROOTPATH, "output/results-summary-051425/nbr_coeff_nbinom2_antipro.pdf", sep=""), 
+  #device="pdf",
+  #width=10,
+  #plot=reg_plot)
+
+reg_plot
+```
+
+### NBR with left/right
+
+Here we use the same code template and tweak a few parameters to produce 4 figures 
+
+- Figure 9: include `if_left`, `if_right` in the IVs; keeping respondents who have engaged with any youtube content in a certain form (Table 3)
+- Figure 10-B (appendix): include `extreme_lftRght` in the IVs; keeping respondents who have engaged with any youtube content in a certain form (Table 3)
+- Figure 14-A2 (appendix): include `if_left`, `if_right` in the IVs; keeping all respondents who have and have not engaged with youtube content (N = 735)
+- Figure 14-B2 (appendix): include `extreme_lftRght` in the IVs; keeping all respondents who have and have not engaged with youtube content (N = 735)
+
+```{r}
+# 1: build models
+nbr.view <- glmmTMB(
+  view_counts ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 9, Figure 14-A2
+  #view_counts ~ gender + age + education + timespan_imputed + interest_politics + extreme_lftRght,  # Figure 10-B, Figure 14-B2
+  weights = weight,
+  data = reg_table,  # Figure 14-A2, Figure 14-B2
+  #data = subset(reg_table, if_view==1),  # Figure 9, Figure 10-B
+  family = nbinom2)
+
+nbr.subscribe <- glmmTMB(
+  subscribe_counts ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 9, Figure 14-A2
+  #subscribe_counts ~ gender + age + education + timespan_imputed + interest_politics + extreme_lftRght,  # Figure 10-B, Figure 14-B2
+  weights = weight,
+  data = reg_table,  # Figure 14-A2, Figure 14-B2
+  #data = subset(reg_table, if_subscribe==1),  # Figure 9, Figure 10-B
+  family = nbinom2)
+
+nbr.comment <- glmmTMB(
+  comment_counts ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 9, Figure 14-A2
+  #comment_counts ~ gender + age + education + timespan_imputed + interest_politics + extreme_lftRght,  # Figure 10-B, Figure 14-B2
+  weights = weight,
+  data = reg_table,  # Figure 14-A2, Figure 14-B2
+  #data = subset(reg_table, if_comment==1),  # Figure 9, Figure 10-B
+  family = nbinom2)
+
+# 2. show model summary: uncomment this block for more details on the NBR results
+#summary(nbr.view)
+#summary(nbr.subscribe)
+#summary(nbr.comment)
+
+# 3: visualize results
+models <- list(comment=nbr.comment, subscribe=nbr.subscribe, view=nbr.view)
+reg_plot = dwplot(models, 
+                  dot_args=list(size=5), 
+                  whisker_args=list(size=1.5)) +
+    facet_grid(~model, scales="free_x") +  # if allowing for flexible scaling
+    facet_grid(~model) +
+    theme_bw(base_size = 10) +
+    geom_vline(xintercept = 0, colour = "black", linetype = 2, size=1) + 
+    scale_color_manual(values=c("#4582b4", "#ff4500","#2d8b57")) + 
+    theme(legend.position="none") + 
+    #ggtitle("(B)") +
+    theme(
+      plot.title = element_text(face = "bold", size=24),
+      text = element_text(size = 22),
+      axis.text.x = element_text(size=15)) + 
+    scale_y_discrete(labels = c("right", "left", "interest in politics", "timespan", "education", "age","gender"))  # Figure 9, Figure 14-A2
+    #scale_y_discrete(labels = c("left/right\nextremity", "interest in politics", "timespan", "education", "age","gender"))  # Figure 10-B, Figure 14-B2
+
+# 4: save figures: uncomment this block to save the output figures
+#ggsave(
+  #paste(ROOTPATH, "output/results-summary-051425/nbr_coeff_nbinom2_antipro.pdf", sep=""), 
+  #device="pdf",
+  #width=10,
+  #plot=reg_plot)
+
+reg_plot
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

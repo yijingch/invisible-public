@@ -1,0 +1,635 @@
+---
+title: "Supplementary analysis for user-level analysis"
+author: "yijing"
+date: "2024-07-09"
+output: html_document
+---
+
+# Supplementary analysis at the user level
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS)
+library(lubridate)
+library(dplyr)
+library(sjmisc)
+library(sjPlot)
+library(sjstats)
+library(sjlabelled)
+library(lme4)
+library(lmerTest)
+library(ggplot2)
+library(lavaan)
+library(psych)
+library(mice)
+library(miceadds)
+library(broom.mixed)
+library(margins)
+library(readr)
+
+ROOTPATH <- substr(getwd(), 1, nchar(getwd())-12)
+ROOTPATH
+```
+
+## Marginal prediction - Figure 11
+
+joint effect of political interest and anti/pro-gov scale on the number of viewed political videos
+
+
+```{r}
+data <- read.csv(paste(ROOTPATH, "output/reg_table_filter_ytb_activities_122324.csv", sep=""))
+
+data$polintrest_govsymp=10
+data$polintrest_govsymp[data$if_antigov==1] <- 20
+data$polintrest_govsymp[data$if_progov==1] <- 30
+data$timespan = data$timespan_imputed / 60
+data$age = data$age / 10
+
+data$interest_politics[is.na(data$interest_politics)] <- 2
+data$polintrest_govsymp[data$interest_politics>=3] <- data$polintrest_govsymp[data$interest_politics>=3]+1
+
+data$polintrest_govsymp <- sjmisc::rec(data$polintrest_govsymp, rec="10=1 [Low PI - Centre];
+                                             11=2 [High PI - Centre];
+                                             20=3 [Low PI - AntiGov];
+                                             21=4 [High PI - AntiGov];
+                                             30=5 [Low PI - ProGov];
+                                             31=6 [High PI - ProGov]")
+
+data$polintrest_govsymp <- as_factor(data$polintrest_govsymp)
+
+# NB model
+pm1 <- data %>%
+  filter(if_view==1) %>%
+  glm.nb(view_counts ~ gender + age + education +polintrest_govsymp + timespan, 
+         data=., weight=weight)  %>%
+  plot_model(type="pred")
+
+# plot figure
+pm1$polintrest_govsymp +
+  xlab("") +
+  ylab("") +
+  ggtitle("") +
+  theme(axis.text=element_text(size=12)) + 
+  theme_minimal()
+
+# uncomment this to save figure
+#ggsave("polint2.png")
+```
+
+## Multiple imputation - Figure 15
+
+Pooled regression results for multiple imputation displaying Average Marginal Effects (AME). 
+
+```{r}
+# load data
+load(paste(ROOTPATH, "data/TK_DataDonation_eng.Rdata", sep=""))
+data <- TK_DataDonation %>%
+  dplyr::select(respondent_id, P14_1, P15_1) %>%
+  left_join(data, .)
+
+rm(TK_DataDonation)
+
+# create a file for imputtaion
+data2 <- data %>%
+  dplyr::select(respondent_id, weight, if_view,if_subscribe,if_comment, view_counts,subscribe_counts, comment_counts,
+                gender, age, education, interest_politics, P14_1, P15_1, timespan)
+
+data2$GovSymp <- as_factor(rec(data2$P14_1, rec="0:2=1 [AntiGov]; 3:7=2 [Centre]; 8:10=3 [ProGov]; 99=NA"))
+data2$LR <- as_factor(rec(data2$P15_1, rec="1:2=1 [Left]; 3:5=2 [Centre]; 6:7=3 [Right]; 9=NA"))
+
+data2 <- dplyr::select(data2, -c("P14_1", "P15_1"))
+
+## impute missing data
+b1 <- c("respondent_id", "weight", "if_view","if_subscribe","if_comment", "view_counts", 
+        "subscribe_counts", "comment_counts")
+b2 <- c("gender","age","education","interest_politics",
+        "timespan", "GovSymp","LR")
+
+imp.block.list <- list()
+imp.block.list[[1]] <- b1
+imp.block.list[[2]] <- b2
+
+p.matrix <- matrix(0,2,15)
+p.matrix[2,9:15] <- 1
+
+data.mice <- mice(data2[, c(b1,b2)], m=5, maxit=50,
+                  meth='pmm', seed=500, blocks=imp.block.list, predictorMatrix=p.matrix, print = F)
+data.comp <- complete(data.mice, action = "long", include = T)
+
+rm(data.mice)
+rm(imp.block.list)
+rm(p.matrix)
+rm(b1, b2)
+
+# solve the factor level issue
+data.comp$GovSymp <- data.comp$GovSymp %>%  factor(., levels=c("2","1","3")) %>%
+  set_labels(data.comp$GovSymp, labels = c("AntiGov","Centre","ProGov"))
+
+data.comp$LR <- data.comp$LR %>%  factor(., levels=c("2","1","3")) %>%
+  set_labels(data.comp$LR, labels = c("Left","Centre","Right"))
+
+data.comp.mids <- as.mids(data.comp)
+```
+
+## AME with pro-/anti-gov as IVs
+
+```{r}
+# comment
+data.comp.comment <- filter(data.comp, if_comment==1)
+data.comp.comment.mids <- as.mids(data.comp.comment)
+pooled_comment <- with(data.comp.comment.mids, glm.nb(comment_counts ~ gender + age + education + interest_politics +GovSymp  + timespan, 
+                                                      weight=weight))
+
+## calculate AME for plot
+for (i in 1:5)
+{ 
+  m_marginal <- glm.nb(comment_counts ~ gender + age + education + interest_politics +GovSymp  + timespan, 
+                       weight=weight, data=data.comp.comment, subset=.imp==i)
+  if (i==1)
+  { 
+    save_terms <- tibble(term=names(summary(margins(m_marginal))$AME))
+    res_ame <- save_terms 
+    res_se <- res_ame
+    res_p <- res_ame
+  }
+  
+  res_ame <- bind_cols(res_ame, as_tibble(summary(margins(m_marginal))$AME))
+  res_se <- bind_cols(res_se, as_tibble(summary(margins(m_marginal))$SE))
+  res_p <- bind_cols(res_p, as_tibble(summary(margins(m_marginal))$p))
+}
+
+comment_model <- tibble(term=res_ame$term)
+comment_model$ame <- apply(res_ame[,2:6],1, mean)
+comment_model$se <- apply(res_se[,2:6],1, mean)
+comment_model$p <- apply(res_p[,2:6],1, mean)
+
+comment_model <- summary(pool(pooled_comment)) %>%
+  dplyr::select(term, estimate, std.error, p.value) %>%
+  left_join(., comment_model)
+
+
+# subscription
+data.comp.subc <- filter(data.comp, if_subscribe==1)
+data.comp.subc.mids <- as.mids(data.comp.subc)
+pooled_subscr <- with(data.comp.subc.mids, glm.nb(subscribe_counts ~ gender + age + education + interest_politics +GovSymp  + timespan, 
+                                                  weight=weight))
+
+## calculate AME for plot
+for (i in 1:5)
+{ 
+  m_marginal <- glm.nb(subscribe_counts ~ gender + age + education + interest_politics +GovSymp  + timespan, 
+                       weight=weight, data=data.comp.subc, subset=.imp==i)
+  if (i==1)
+  { 
+    save_terms <- tibble(term=names(summary(margins(m_marginal))$AME))
+    res_ame <- save_terms 
+    res_se <- res_ame
+    res_p <- res_ame
+  }
+  
+  res_ame <- bind_cols(res_ame, as_tibble(summary(margins(m_marginal))$AME))
+  res_se <- bind_cols(res_se, as_tibble(summary(margins(m_marginal))$SE))
+  res_p <- bind_cols(res_p, as_tibble(summary(margins(m_marginal))$p))
+}
+
+subscr_model <- tibble(term=res_ame$term)
+subscr_model$ame <- apply(res_ame[,2:6],1, mean)
+subscr_model$se <- apply(res_se[,2:6],1, mean)
+subscr_model$p <- apply(res_p[,2:6],1, mean)
+
+subscr_model <- summary(pool(pooled_subscr)) %>%
+  dplyr::select(term, estimate, std.error, p.value) %>%
+  left_join(., subscr_model)
+
+
+# viewing
+data.comp.view <- filter(data.comp, if_view==1)
+data.comp.view.mids <- as.mids(data.comp.view)
+pooled_view <- with(data.comp.view.mids, glm.nb(view_counts ~ gender + age + education + interest_politics +GovSymp  + timespan, 
+                                                weight=weight))
+
+## calculate AME for plot
+for (i in 1:5)
+{ 
+  m_marginal <- glm.nb(view_counts ~ gender + age + education + interest_politics +GovSymp  + timespan, 
+                       weight=weight, data=data.comp.view, subset=.imp==i)
+  
+  if (i==1)
+  { 
+    save_terms <- tibble(term=names(summary(margins(m_marginal))$AME))
+    res_ame <- save_terms 
+    res_se <- res_ame
+    res_p <- res_ame
+  }
+  
+  res_ame <- bind_cols(res_ame, as_tibble(summary(margins(m_marginal))$AME))
+  res_se <- bind_cols(res_se, as_tibble(summary(margins(m_marginal))$SE))
+  res_p <- bind_cols(res_p, as_tibble(summary(margins(m_marginal))$p))
+}
+
+view_model <- tibble(term=res_ame$term)
+view_model$ame <- apply(res_ame[,2:6],1, mean)
+view_model$se <- apply(res_se[,2:6],1, mean)
+view_model$p <- apply(res_p[,2:6],1, mean)
+
+view_model <- summary(pool(pooled_view)) %>%
+  dplyr::select(term, estimate, std.error, p.value) %>%
+  left_join(., view_model)
+```
+
+```{r, fig.height=10, fig.width=10}
+
+# plot the AME values
+margins <- view_model %>%
+  bind_rows(., subscr_model) %>%
+  bind_rows(., comment_model) %>%
+  na.omit() %>%
+  mutate(Type = case_when(
+    row_number() <= 7 ~ 'View count',
+    row_number() > 7 & row_number() <= 14 ~ 'Subscribe count',
+    row_number() > 14 & row_number() <= 21 ~ 'Comment count'
+  ))
+
+
+labels <- rev(c("gender", "age", "education", "timespan", "interest in politcs", 
+                "pro-gov",  "anti-gov"))
+
+margins %>%
+  mutate(Type = factor(Type, levels = c("View count", 
+                                        "Subscribe count","Comment count"))) %>% 
+  mutate(term = factor(term, levels = rev(c("gender","age","education","timespan","interest_politics",
+                                            "GovSymp3","GovSymp1")))) %>% 
+  ggplot(aes(term,ame,color=Type,fill=Type)) +
+  geom_point(shape=21,size=3) +
+  geom_pointrange(aes(ymin=ame-2*se, ymax=ame+2*se)) + 
+  geom_hline(yintercept = 0,color="grey25",linetype="dashed") +
+  theme_minimal() + 
+  scale_fill_manual(values=c("#E07A5F","navyblue","#3D405B"))+
+  scale_color_manual(values=c("#E07A5F","navyblue","#3D405B"))+
+  coord_flip()+
+  facet_wrap(~Type, scales="free", axis.labels="all_x")+
+  scale_y_continuous(name="AME")+
+  scale_x_discrete(name="",labels=labels)+
+  theme(legend.position = "none")  +
+  theme(axis.text=element_text(size=12), strip.text = element_text(
+    size = 16))
+
+# uncomment this block to save it
+#ggsave("mi1_cor.png")
+```
+## AME with left/right as IVs
+
+```{r}
+# Comment 
+pooled_comment <- with(data.comp.comment.mids, glm.nb(comment_counts ~ gender + age + education + interest_politics +LR  + timespan, 
+                                                      weight=weight))
+# calculate AME for plot
+for (i in 1:5)
+{ 
+  m_marginal <- glm.nb(comment_counts ~ gender + age + education + interest_politics +LR  + timespan, 
+                       weight=weight, data=data.comp.comment, subset=.imp==i)
+  
+  if (i==1)
+  { 
+    save_terms <- tibble(term=names(summary(margins(m_marginal))$AME))
+    res_ame <- save_terms 
+    res_se <- res_ame
+    res_p <- res_ame
+  }
+  
+  res_ame <- bind_cols(res_ame, as_tibble(summary(margins(m_marginal))$AME))
+  res_se <- bind_cols(res_se, as_tibble(summary(margins(m_marginal))$SE))
+  res_p <- bind_cols(res_p, as_tibble(summary(margins(m_marginal))$p))
+}
+
+comment_model <- tibble(term=res_ame$term)
+comment_model$ame <- apply(res_ame[,2:6],1, mean)
+comment_model$se <- apply(res_se[,2:6],1, mean)
+comment_model$p <- apply(res_p[,2:6],1, mean)
+
+comment_model <- summary(pool(pooled_comment)) %>%
+  dplyr::select(term, estimate, std.error, p.value) %>%
+  left_join(., comment_model)
+
+# Subscription
+pooled_subscr <- with(data.comp.subc.mids, glm.nb(subscribe_counts ~ gender + age + education + interest_politics +LR  + timespan, 
+                                                  weight=weight))
+
+## calculate AME for plot
+for (i in 1:5)
+{ 
+  m_marginal <- glm.nb(subscribe_counts ~ gender + age + education + interest_politics +LR  + timespan, 
+                       weight=weight, data=data.comp.subc, subset=.imp==i)
+  
+  if (i==1)
+  { 
+    save_terms <- tibble(term=names(summary(margins(m_marginal))$AME))
+    res_ame <- save_terms 
+    res_se <- res_ame
+    res_p <- res_ame
+  }
+  
+  res_ame <- bind_cols(res_ame, as_tibble(summary(margins(m_marginal))$AME))
+  res_se <- bind_cols(res_se, as_tibble(summary(margins(m_marginal))$SE))
+  res_p <- bind_cols(res_p, as_tibble(summary(margins(m_marginal))$p))
+}
+
+subscr_model <- tibble(term=res_ame$term)
+subscr_model$ame <- apply(res_ame[,2:6],1, mean)
+subscr_model$se <- apply(res_se[,2:6],1, mean)
+subscr_model$p <- apply(res_p[,2:6],1, mean)
+
+subscr_model <- summary(pool(pooled_subscr)) %>%
+  dplyr::select(term, estimate, std.error, p.value) %>%
+  left_join(., subscr_model)
+
+# viewing
+pooled_view <- with(data.comp.view.mids, glm.nb(view_counts ~ gender + age + education + interest_politics +LR  + timespan, 
+                                                weight=weight))
+
+# calculate AME for plot
+for (i in 1:5)
+{ 
+  m_marginal <- glm.nb(view_counts ~ gender + age + education + interest_politics +LR  + timespan, 
+                       weight=weight, data=data.comp.view, subset=.imp==i)
+  
+  if (i==1)
+  { 
+    save_terms <- tibble(term=names(summary(margins(m_marginal))$AME))
+    res_ame <- save_terms 
+    res_se <- res_ame
+    res_p <- res_ame
+  }
+  
+  res_ame <- bind_cols(res_ame, as_tibble(summary(margins(m_marginal))$AME))
+  res_se <- bind_cols(res_se, as_tibble(summary(margins(m_marginal))$SE))
+  res_p <- bind_cols(res_p, as_tibble(summary(margins(m_marginal))$p))
+}
+
+view_model <- tibble(term=res_ame$term)
+view_model$ame <- apply(res_ame[,2:6],1, mean)
+view_model$se <- apply(res_se[,2:6],1, mean)
+view_model$p <- apply(res_p[,2:6],1, mean)
+
+view_model <- summary(pool(pooled_view)) %>%
+  dplyr::select(term, estimate, std.error, p.value) %>%
+  left_join(., view_model)
+```
+
+
+```{r, fig.height=10, fig.width=10}
+
+# plot the AME values
+margins <- view_model %>%
+  bind_rows(., subscr_model) %>%
+  bind_rows(., comment_model) %>%
+  na.omit() %>%
+  mutate(Type = case_when(
+    row_number() <= 7 ~ 'View count',
+    row_number() > 7 & row_number() <= 14 ~ 'Subscribe count',
+    row_number() > 14 & row_number() <= 21 ~ 'Comment count'
+  ))
+
+
+labels <- rev(c("gender", "age", "education", "timespan", "interest in politcs", 
+                "left",  "right"))
+
+margins %>%
+  mutate(Type = factor(Type, levels = c("View count", 
+                                        "Subscribe count","Comment count"))) %>% 
+  mutate(term = factor(term, levels = rev(c("gender","age","education","timespan","interest_politics",
+                                            "LR1","LR3")))) %>% 
+  ggplot(aes(term,ame,color=Type,fill=Type)) +
+  geom_point(shape=21,size=3) +
+  geom_pointrange(aes(ymin=ame-2*se, ymax=ame+2*se)) + 
+  geom_hline(yintercept = 0,color="grey25",linetype="dashed") +
+  theme_minimal() + 
+  scale_fill_manual(values=c("#E07A5F","navyblue","#3D405B"))+
+  scale_color_manual(values=c("#E07A5F","navyblue","#3D405B"))+
+  coord_flip()+
+  facet_wrap(~Type, scales="free", axis.labels="all_x")+
+  scale_y_continuous(name="AME")+
+  scale_x_discrete(name="",labels=labels)+
+  theme(legend.position = "none")  +
+  theme(axis.text=element_text(size=12), strip.text = element_text(
+    size = 16))
+
+# uncomment this block to save it
+ggsave("mi2_cor.png")
+```
+
+## Basic stats for DDPS - Table 9, 10
+
+```{r}
+load(paste(ROOTPATH, "data/youtube/yt_resplevel_data_1229.Rdata", sep=""))
+data <- yt_resplevel  %>%
+  dplyr::select(respondent_id, all_watch_sel, all_comment_sel, all_subscription)  %>%
+  left_join(data, .)
+data$agecat <-  sjmisc::rec(data$age, rec="1.6:3.4=1; 3.5:4.9=2; 5:6.4=3; 6.5:100=4")
+```
+
+```{r}
+## print stats for Table 9
+### viewing
+print("all viewing")
+data %>%
+  filter(if_view==1) %>%
+  descr(all_watch_sel, weights = weight)
+
+data %>%
+  filter(if_view == 1) %>%
+  summarise(median = median(all_watch_sel, na.rm = TRUE)) # median
+
+print("pol viewing")
+data %>%
+  filter(if_view==1) %>%
+  descr(view_counts, weights = weight)
+
+data %>%
+  filter(if_view == 1) %>%
+  summarise(median = median(view_counts, na.rm = TRUE)) # median
+
+### subscribing
+print("all subscribing")
+data %>%
+  tidyr::replace_na(list(all_subscription=0)) %>%
+  descr(all_subscription, weights = weight)
+
+data %>%
+  tidyr::replace_na(list(all_subscription=0)) %>%
+  summarise(median = median(all_subscription, na.rm = TRUE)) # median
+
+print("pol subscribing")
+data %>%
+  tidyr::replace_na(list(all_subscription=0)) %>%
+  descr(subscribe_counts, weights = weight)
+
+data %>%
+  tidyr::replace_na(list(all_subscription=0)) %>%
+  summarise(median = median(subscribe_counts, na.rm = TRUE)) # median
+
+### commenting
+print("all commenting")
+data %>%
+  tidyr::replace_na(list(all_comment_sel=0)) %>%
+  descr(all_comment_sel, weights = weight)
+
+data %>%
+  tidyr::replace_na(list(all_comment_sel=0)) %>%
+  summarise(median = median(all_comment_sel, na.rm = TRUE)) # median
+
+print("pol commenting")
+data %>%
+  tidyr::replace_na(list(comment_counts=0)) %>%
+  descr(comment_counts, weights = weight)
+
+data %>%
+  tidyr::replace_na(list(comment_counts=0)) %>%
+  summarise(median = median(comment_counts, na.rm = TRUE)) # median
+
+### timespan
+print("timespan")
+data %>%
+  tidyr::replace_na(list(all_watch_sel=0, all_comment_sel=0)) %>%
+  mutate(no_ts=all_watch_sel+all_comment_sel) %>%
+  subset(no_ts>0) %>%
+  descr(timespan, weights = weight)
+
+data %>%
+  tidyr::replace_na(list(all_watch_sel=0, all_comment_sel=0)) %>%
+  mutate(no_ts=all_watch_sel+all_comment_sel) %>%
+  subset(no_ts>0) %>%
+  summarise(median = median(timespan, na.rm = TRUE)) # median
+```
+
+
+```{r}
+## print stats for Table 10
+
+### viewing
+data %>%
+  subset(if_view==1) %>%
+  group_by(gender) %>%
+  summarise(s1=weighted_mean(all_watch_sel, weight), s2=weighted_se(all_watch_sel, weight))
+
+data %>%
+  subset(if_view==1) %>%
+  group_by(agecat) %>%
+  summarise(s1=weighted_mean(all_watch_sel, weight), s2=weighted_se(all_watch_sel, weight))
+
+data %>%
+  subset(if_view==1) %>%
+  group_by(education) %>%
+  summarise(s1=weighted_mean(all_watch_sel, weight), s2=weighted_se(all_watch_sel, weight))
+
+### subscribing 
+data %>%
+  tidyr::replace_na(list(all_subscription=0)) %>%
+  group_by(gender) %>%
+  summarise(s1=weighted_mean(all_subscription, weight), s2=weighted_se(all_subscription, weight))
+
+data %>%
+  tidyr::replace_na(list(all_subscription=0)) %>%
+  group_by(agecat) %>%
+  summarise(s1=weighted_mean(all_subscription, weight), s2=weighted_se(all_subscription, weight))
+
+data %>%
+  tidyr::replace_na(list(all_subscription=0)) %>%
+  group_by(education) %>%
+  summarise(s1=weighted_mean(all_subscription, weight), s2=weighted_se(all_subscription, weight))
+
+### commenting
+data %>%
+  tidyr::replace_na(list(all_comment_sel=0)) %>%
+  group_by(gender) %>%
+  summarise(s1=weighted_mean(all_comment_sel, weight), s2=weighted_se(all_comment_sel, weight))
+
+
+data %>%
+  tidyr::replace_na(list(all_comment_sel=0)) %>%
+  group_by(agecat) %>%
+  summarise(s1=weighted_mean(all_comment_sel, weight), s2=weighted_se(all_comment_sel, weight))
+
+data %>%
+  tidyr::replace_na(list(all_comment_sel=0)) %>%
+  group_by(education) %>%
+  summarise(s1=weighted_mean(all_comment_sel, weight), s2=weighted_se(all_comment_sel, weight))
+
+### timespan
+data %>%
+  tidyr::replace_na(list(all_watch_sel=0, all_comment_sel=0)) %>%
+  mutate(no_ts=all_watch_sel+all_comment_sel) %>%
+  subset(no_ts>0) %>%
+  group_by(gender) %>%
+  summarise(s1=weighted_mean(timespan, weight), s2=weighted_se(timespan, weight))
+
+data %>%
+  tidyr::replace_na(list(all_watch_sel=0, all_comment_sel=0)) %>%
+  mutate(no_ts=all_watch_sel+all_comment_sel) %>%
+  subset(no_ts>0) %>%
+  group_by(agecat) %>%
+  summarise(s1=weighted_mean(timespan, weight), s2=weighted_se(timespan, weight))
+
+data %>%
+  tidyr::replace_na(list(all_watch_sel=0, all_comment_sel=0)) %>%
+  mutate(no_ts=all_watch_sel+all_comment_sel) %>%
+  subset(no_ts>0) %>%
+  group_by(education) %>%
+  summarise(s1=weighted_mean(timespan, weight), s2=weighted_se(timespan, weight))
+```
+
+```{r}
+## print stats for Table 11
+
+### viewing
+data %>%
+  subset(if_view==1) %>%
+  group_by(gender) %>%
+  summarise(s1=weighted_mean(view_counts, weight), s2=weighted_se(view_counts, weight))
+
+data %>%
+  subset(if_view==1) %>%
+  group_by(agecat) %>%
+  summarise(s1=weighted_mean(view_counts, weight), s2=weighted_se(view_counts, weight))
+
+data %>%
+  subset(if_view==1) %>%
+  group_by(education) %>%
+  summarise(s1=weighted_mean(view_counts, weight), s2=weighted_se(view_counts, weight))
+
+### subscribing
+data %>%
+  tidyr::replace_na(list(subscribe_counts=0)) %>%
+  group_by(gender) %>%
+  summarise(s1=weighted_mean(subscribe_counts, weight), s2=weighted_se(subscribe_counts, weight))
+
+
+data %>%
+  tidyr::replace_na(list(subscribe_counts=0)) %>%
+  group_by(agecat) %>%
+  summarise(s1=weighted_mean(subscribe_counts, weight), s2=weighted_se(subscribe_counts, weight))
+
+data %>%
+  tidyr::replace_na(list(subscribe_counts=0)) %>%
+  group_by(education) %>%
+  summarise(s1=weighted_mean(subscribe_counts, weight), s2=weighted_se(subscribe_counts, weight))
+
+### commenting
+data %>%
+  tidyr::replace_na(list(comment_counts=0)) %>%
+  group_by(gender) %>%
+  summarise(s1=weighted_mean(comment_counts, weight), s2=weighted_se(comment_counts, weight))
+
+
+data %>%
+  tidyr::replace_na(list(comment_counts=0)) %>%
+  group_by(agecat) %>%
+  summarise(s1=weighted_mean(comment_counts, weight), s2=weighted_se(comment_counts, weight))
+
+data %>%
+  tidyr::replace_na(list(comment_counts=0)) %>%
+  group_by(education) %>%
+  summarise(s1=weighted_mean(comment_counts, weight), s2=weighted_se(comment_counts, weight))
+```
+
+

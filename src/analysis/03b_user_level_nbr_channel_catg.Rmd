@@ -1,0 +1,171 @@
+---
+title: "Negative Binomial Regression (user-level) with channel category breakdown"
+author: "yijing"
+date: "2024-07-09"
+output: html_document
+---
+
+# Generating Negative Binomial regression output for user-level analysis (with breakdowns for different channel categories)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(svyVGAM)
+library(survey)
+library(pscl)
+library(ggplot2)
+library(MASS)
+library(performance)
+library(tidyverse)
+library(AER)
+library(dotwhisker)
+library(glmmTMB)
+
+ROOTPATH <- substr(getwd(), 1, nchar(getwd())-12)
+ROOTPATH
+```
+
+## Load data
+
+```{r}
+reg_table <- read.csv(paste(ROOTPATH, "output/reg_table_filter_ytb_activities_channel_catg_counts_122324.csv", sep=""))
+reg_table$age = reg_table$age / 10
+reg_table$timespan_imputed = reg_table$timespan_imputed / 60
+reg_table
+```
+
+## Negative Bionomial regression (NBR) - using glmmTMB
+
+### NBR with Anti-/Pro-gov 
+
+Here we use the same code template and tweak a few parameters to produce 3 figures 
+
+- Figure 12-A: using count of views/subscribes/comments under the anti-government channels as DVs
+- Figure 12-B: using count of views/subscribes/comments under the neutral channels as DVs
+- Figure 12-C: using count of views/subscribes/comments under the pro-government channels as DVs
+
+```{r}
+# 1: build models
+nbr.view <- glmmTMB(
+  #view_anti ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-A
+  #view_netr ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-B
+  view_pro ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-C
+  weights = weight,
+  data = subset(reg_table, if_view==1), 
+  family = nbinom2)
+
+nbr.subscribe <- glmmTMB(
+  #subscribe_anti ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-A
+  #subscribe_netr ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-B
+  subscribe_pro ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-C
+  weights = weight,
+  data = subset(reg_table, if_subscribe==1), 
+  family = nbinom2)
+
+nbr.comment <- glmmTMB(
+  #comment_anti ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-A
+  #comment_netr ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-B
+  comment_pro ~ gender + age + education + timespan_imputed + interest_politics + if_progov + if_antigov,  # Figure 12-C
+  weights = weight,
+  data = subset(reg_table, if_comment==1), 
+  family = nbinom2)
+
+# 2. show model summary: uncomment this block for more details on the NBR results
+#summary(nbr.view)
+#summary(nbr.subscribe)
+#summary(nbr.comment)
+
+# 3: visualize results
+models <- list(comment=nbr.comment, subscribe=nbr.subscribe, view=nbr.view)
+reg_plot = dwplot(models, 
+                  dot_args=list(size=5), 
+                  whisker_args=list(size=1.5)) +
+    facet_grid(~model, scales="free_x") +
+    theme_bw(base_size = 10) +
+    geom_vline(xintercept = 0, colour = "black", linetype = 2, size=1) + 
+    scale_color_manual(values=c("#4582b4", "#ff4500","#2d8b57")) + 
+    theme(legend.position="none") + 
+    #ggtitle("(A) Anti-government channels") +   # Figure 12-A
+    #ggtitle("(B) Neutral channels") +  # Figure 12-B
+    ggtitle("(C) Pro-government channels") +  # Figure 12-C
+    theme(
+      plot.title = element_text(face = "bold", size=24),
+      text = element_text(size = 22),
+      axis.text.x = element_text(size=15)) + 
+    scale_y_discrete(labels = c("anti-gov", "pro-gov", "interest in politics", "timespan", "education", "age","gender"))
+  
+# 4: save figures: uncomment this block to save the output figures
+#ggsave(
+  #paste(ROOTPATH, "output/results-summary-122724/nbr_coeff_nbinom2_progov_channels_lftrght.pdf", sep=""), 
+  #device="pdf",
+  #width=10,
+  #plot=reg_plot)
+reg_plot
+```
+
+
+### NBR with Left/right
+
+Here we use the same code template and tweak a few parameters to produce 3 figures 
+
+- Figure 13-A: using count of views/subscribes/comments under the anti-government channels as DVs
+- Figure 13-B: using count of views/subscribes/comments under the neutral channels as DVs
+- Figure 13-C: using count of views/subscribes/comments under the pro-government channels as DVs
+
+```{r}
+# 1: build models
+nbr.view <- glmmTMB(
+  view_anti ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-A
+  #view_netr ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-B
+  #view_pro ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-C
+  weights = weight,
+  data = subset(reg_table, if_view==1), 
+  family = nbinom2)
+
+nbr.subscribe <- glmmTMB(
+  subscribe_anti ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-A
+  #subscribe_netr ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-B
+  #subscribe_pro ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-C
+  weights = weight,
+  data = subset(reg_table, if_subscribe==1), 
+  family = nbinom2)
+
+nbr.comment <- glmmTMB(
+  comment_anti ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-A
+  #comment_netr ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-B
+  #comment_pro ~ gender + age + education + timespan_imputed + interest_politics + if_left + if_right,  # Figure 13-C
+  weights = weight,
+  data = subset(reg_table, if_comment==1), 
+  family = nbinom2)
+
+# 2. show model summary: uncomment this block for more details on the NBR results
+#summary(nbr.view)
+#summary(nbr.subscribe)
+#summary(nbr.comment)
+
+# 3: visualize results
+models <- list(comment=nbr.comment, subscribe=nbr.subscribe, view=nbr.view)
+reg_plot = dwplot(models, 
+                  dot_args=list(size=5), 
+                  whisker_args=list(size=1.5)) +
+    facet_grid(~model, scales="free_x") +
+    theme_bw(base_size = 10) +
+    geom_vline(xintercept = 0, colour = "black", linetype = 2, size=1) + 
+    scale_color_manual(values=c("#4582b4", "#ff4500","#2d8b57")) + 
+    theme(legend.position="none") + 
+    ggtitle("(A) Anti-government channels") +   # Figure 13-A
+    #ggtitle("(B) Neutral channels") +  # Figure 13-B
+    #ggtitle("(C) Pro-government channels") +  # Figure 13-C
+    theme(
+      plot.title = element_text(face = "bold", size=24),
+      text = element_text(size = 22),
+      axis.text.x = element_text(size=15)) + 
+    scale_y_discrete(labels = c("right", "left", "interest in politics", "timespan", "education", "age","gender"))
+  
+# 4: save figures: uncomment this block to save the output figures
+#ggsave(
+  #paste(ROOTPATH, "output/results-summary-122724/nbr_coeff_nbinom2_progov_channels_lftrght.pdf", sep=""), 
+  #device="pdf",
+  #width=10,
+  #plot=reg_plot)
+reg_plot
+```
