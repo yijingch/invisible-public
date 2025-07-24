@@ -6,6 +6,10 @@ OSF preprint: https://osf.io/preprints/socarxiv/mv24c_v2
 
 For any questions please feel free to reach out at yijing2022 at gmail dot com.
 
+## data guide
+
+Our project repository can be found at https://openarchive.tk.mta.hu/629/, where we keep the survey data and the YouTube viewing data. We have also released the channel labels at https://osf.io/gch59.
+
 ## code guide
 
 Code for preprocessing surveys and preparing regression tables can be found in the folder `src/preprocess`; code for analysis can be found in the folder `src/analysis/`. The sheet below links output figures/tables to specific notebooks.
