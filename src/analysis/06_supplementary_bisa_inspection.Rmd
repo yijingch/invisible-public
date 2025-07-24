@@ -1,6 +1,6 @@
 ---
 title: "Supplementary analysis for bias inspection in the data donation studies"
-author: "yijing"
+author: "written by Zoltan, cleaned by Yijing"
 date: "2024-07-09"
 output: html_document
 ---

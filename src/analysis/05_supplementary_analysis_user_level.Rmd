@@ -1,6 +1,6 @@
 ---
 title: "Supplementary analysis for user-level analysis"
-author: "yijing"
+author: "written by Zoltan, cleaned by Yijing"
 date: "2024-07-09"
 output: html_document
 ---
