@@ -31,7 +31,8 @@ def compare_distribution_with_sig(
         sample2:np.array, 
         test_func:Any,
         bruns:str=100,
-        sample_size=-1):
+        sample_size=-1,
+        print_info=True):
 
     if sample_size > 0:
         N1 = N2 = sample_size 
@@ -58,7 +59,7 @@ def compare_distribution_with_sig(
 
     p1 = get_p(bstr_test1, emp_test[0])
     p2 = get_p(bstr_test2, emp_test[0])
-    print("N1 =", N1, "\tN2 =", N2)
+    if print_info: print("N1 =", N1, "\tN2 =", N2)
     return p1, p2
 
 
