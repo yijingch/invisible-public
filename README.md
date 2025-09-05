@@ -1,8 +1,8 @@
 # invisible-public
 
-cleaned up project repository for the paper: The Public that Engages Invisibly: What Visible Engagement Fails to Capture in Online Political Communication
+cleaned up project repository for the paper: Chen, Y., Kmetty, Z., Iñiguez, G., & Omodei, E. (2025). The public that engages invisibly: what visible engagement fails to capture in online political communication. Communication Methods and Measures, 1-19.
 
-OSF preprint: https://osf.io/preprints/socarxiv/mv24c_v2
+Link: https://doi.org/10.1080/19312458.2025.2542725
 
 For any questions please feel free to reach out at yijing2022 at gmail dot com.
 
